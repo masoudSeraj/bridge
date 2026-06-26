@@ -1,6 +1,6 @@
 # Device Bridge Application
 
-A C#/.NET bridge application that connects hardware devices (POS terminal, scale, thermal printer, barcode scanner, **fingerprint readers**) to the web application.
+A C#/.NET bridge application that connects hardware devices (POS terminal, scale, thermal printer, barcode scanner, **fingerprint readers**, and VOIP softphone click-to-call) to the web application.
 
 ## Architecture
 
@@ -13,6 +13,7 @@ The bridge runs locally on the user's PC and exposes HTTP endpoints that the Nex
 - **Scales**: Serial port connected digital scales
 - **Thermal Printers**: Windows printers for receipt printing
 - **Barcode Scanners**: USB keyboard wedge scanners
+- **VOIP / Softphone**: click-to-call through `tel:` URI using the OS default handler
 
 ## Prerequisites
 
@@ -96,6 +97,34 @@ Supported device types:
   }
 }
 ```
+
+### VOIP Configuration
+```json
+{
+  "Bridge": {
+    "DeviceId": "",
+    "BridgeToken": "",
+    "AllowedOrigins": [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000"
+    ],
+    "AllowTenantSubdomains": false,
+    "TrustedDomainSuffix": ""
+  },
+  "Voip": {
+    "MaxCallsPerMinute": 30,
+    "Provider": "tel_uri"
+  }
+}
+```
+
+VOIP notes:
+- `bridge/appsettings.json` is the installer/default config
+- generated values are persisted in `%AppData%/AICompanionBridge/bridge-settings.json`
+- VOIP endpoints require `X-Bridge-Token`
+- If `BridgeToken` is empty, `POST /api/voip/call` returns `403`
+- The bridge only listens on localhost
+- `AllowedOrigins` must include the frontend origin
 
 ## API Endpoints
 
@@ -334,6 +363,68 @@ Health check endpoint.
 }
 ```
 
+### VOIP Endpoints
+
+#### GET /api/bridge/health
+Returns generic bridge presence and pairing metadata.
+
+**Response example:**
+```json
+{
+  "success": true,
+  "deviceId": "device_abc123",
+  "bridgeVersion": "1.0.0",
+  "capabilities": ["voip", "print", "scale", "pos", "fingerprint"],
+  "requiresPairing": true
+}
+```
+
+This endpoint never returns `BridgeToken`.
+
+#### GET /api/voip/health
+Returns local VOIP bridge readiness for the frontend.
+
+**Response example when token is missing:**
+```json
+{
+  "success": true,
+  "enabled": true,
+  "ready": false,
+  "provider": "tel_uri",
+  "issues": ["Bridge token is not configured."]
+}
+```
+
+#### POST /api/voip/call
+Launches the local OS softphone handler for a phone number.
+
+**Headers:**
+```text
+Content-Type: application/json
+X-Bridge-Token: YOUR_TOKEN
+```
+
+**Request:**
+```json
+{
+  "phone": "09123456789",
+  "normalizedPhone": "09123456789",
+  "leadId": 123,
+  "displayName": "مشتری نمونه"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "callSessionId": "4b1e4b32f89349ebb71e1f5d6d149b34",
+  "provider": "tel_uri",
+  "status": "requested",
+  "errorMessage": null
+}
+```
+
 ## Device Integration
 
 ### Fingerprint/Attendance Devices
@@ -416,8 +507,11 @@ The bridge includes TODO comments where device-specific code should be implement
 ## Security
 
 - The bridge only listens on localhost (not exposed to network)
-- No authentication required (local only)
 - All input is validated before processing
+- VOIP endpoints require `X-Bridge-Token`
+- `BridgeToken` is stored in local writable settings, not returned by health endpoints
+- If `BridgeToken` is empty, `POST /api/voip/call` returns `403`
+- `AllowedOrigins` must include the frontend origin for browser access
 
 ## License
 

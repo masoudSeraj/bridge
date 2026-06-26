@@ -1,0 +1,9 @@
+C:\wamp64\www\ai-companion\bridge\bin\Release\net8.0-windows\win-x64\publish\bridge.exe
+C:\wamp64\www\ai-companion\bridge\bin\Release\net8.0-windows\win-x64\publish\appsettings.json
+C:\wamp64\www\ai-companion\bridge\bin\Release\net8.0-windows\win-x64\publish\bridge.dll
+C:\wamp64\www\ai-companion\bridge\bin\Release\net8.0-windows\win-x64\publish\bridge.deps.json
+C:\wamp64\www\ai-companion\bridge\bin\Release\net8.0-windows\win-x64\publish\bridge.runtimeconfig.json
+C:\wamp64\www\ai-companion\bridge\bin\Release\net8.0-windows\win-x64\publish\bridge.pdb
+C:\wamp64\www\ai-companion\bridge\bin\Release\net8.0-windows\win-x64\publish\Microsoft.Win32.SystemEvents.dll
+C:\wamp64\www\ai-companion\bridge\bin\Release\net8.0-windows\win-x64\publish\System.Drawing.Common.dll
+C:\wamp64\www\ai-companion\bridge\bin\Release\net8.0-windows\win-x64\publish\System.IO.Ports.dll

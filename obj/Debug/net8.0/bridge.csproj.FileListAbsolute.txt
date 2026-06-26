@@ -1,0 +1,7 @@
+C:\wamp64\www\ai-companion\bridge\obj\Debug\net8.0\bridge.csproj.AssemblyReference.cache
+C:\wamp64\www\ai-companion\bridge\obj\Debug\net8.0\bridge.GeneratedMSBuildEditorConfig.editorconfig
+C:\wamp64\www\ai-companion\bridge\obj\Debug\net8.0\bridge.AssemblyInfoInputs.cache
+C:\wamp64\www\ai-companion\bridge\obj\Debug\net8.0\bridge.AssemblyInfo.cs
+C:\wamp64\www\ai-companion\bridge\obj\Debug\net8.0\bridge.csproj.CoreCompileInputs.cache
+C:\wamp64\www\ai-companion\bridge\obj\Debug\net8.0\bridge.MvcApplicationPartsAssemblyInfo.cache
+C:\wamp64\www\ai-companion\bridge\obj\Debug\net8.0\bridge.sourcelink.json

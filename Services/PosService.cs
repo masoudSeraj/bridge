@@ -76,11 +76,11 @@ public class PosService
         }
     }
 
-    private string GenerateRrn()
+    private static string GenerateRrn()
     {
-        // Generate a 12-digit RRN (Retrieval Reference Number)
-        var random = new Random();
-        return random.Next(100000000000, 999999999999).ToString();
+        return Random.Shared
+            .NextInt64(100_000_000_000L, 1_000_000_000_000L)
+            .ToString();
     }
 
     // Example TCP/IP implementation (commented out - implement based on your POS device)
