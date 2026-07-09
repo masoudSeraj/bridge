@@ -1,25 +1,38 @@
 # Device Bridge Application
 
-A C#/.NET bridge application that connects hardware devices (POS terminal, scale, thermal printer, barcode scanner, **fingerprint readers**, and VOIP softphone click-to-call) to the web application.
+A local C#/.NET bridge for hardware-adjacent workflows that browsers cannot perform directly. The MVP is intentionally conservative: bridge process liveness is separate from per-device readiness, and unsupported hardware integrations return structured errors instead of fake success.
 
 ## Architecture
 
 The bridge runs locally on the user's PC and exposes HTTP endpoints that the Next.js frontend can call from the browser. This allows the web application to interact with hardware devices that browsers cannot access directly.
 
-## Supported Devices
+## MVP Device Matrix
 
-- **Fingerprint/Attendance Devices**: ZKTeco, Suprema, Anviz and similar TCP/IP devices
-- **POS Terminals**: TCP/IP connected payment terminals
-- **Scales**: Serial port connected digital scales
-- **Thermal Printers**: Windows printers for receipt printing
-- **Barcode Scanners**: USB keyboard wedge scanners
-- **VOIP / Softphone**: click-to-call through `tel:` URI using the OS default handler
+- **Fingerprint/Attendance Devices**: TCP reachability can be tested, but ZKTeco/Suprema/Anviz protocol and SDK support is not implemented yet.
+- **POS Terminals**: real POS integration is not implemented yet. The endpoint returns `unsupported` unless explicit development-only mock mode is enabled.
+- **Scales**: serial-port reads are real and return structured JSON for missing COM ports, invalid config, access denial, parse failures, and timeouts.
+- **Thermal Printers**: readiness checks validate installed/default printer availability without printing. Receipt printing is attempted only by `/api/print/receipt`.
+- **Barcode Scanners**: handled as keyboard-wedge input in the browser. The bridge does not detect barcode scanner hardware.
+- **VOIP / Softphone**: validates bridge token/provider/config and launches `tel:` URLs. It cannot guarantee that the OS softphone is registered or available.
+
+## Response Contract
+
+Device-facing responses include stable status metadata where applicable:
+
+- `success`
+- `mode`: `real`, `mock`, `disabled`, `unsupported`, or `misconfigured`
+- `ready`
+- `code`
+- `errorMessage`
+- `errorMessageFa`
+
+`/api/health` is process-only liveness. `/api/bridge/health` returns bridge status plus per-service readiness.
 
 ## Prerequisites
 
 - .NET 8 SDK
 - Windows OS (for SerialPort and printer access)
-- Hardware devices connected and configured on the network
+- Hardware devices connected and configured only for the integrations you are actually using
 
 ## Installation
 
@@ -60,21 +73,21 @@ Edit `appsettings.json` to configure your devices:
 }
 ```
 
-Supported device types:
-- `ZKTeco` - ZKTeco fingerprint devices (most common)
-- `Suprema` - Suprema biometric devices
-- `Anviz` - Anviz attendance devices
+`DeviceType` is accepted as request/config metadata only. Real vendor protocol support must be implemented with the matching SDK or protocol before these devices can be marked ready.
 
 ### POS Configuration
 ```json
 {
   "Pos": {
-    "IpAddress": "192.168.1.100",
-    "Port": "8080",
-    "ConnectionType": "TCP"
+    "Mode": "unsupported",
+    "IpAddress": "",
+    "Port": "",
+    "ConnectionType": ""
   }
 }
 ```
+
+Set `Mode` to `mock` only for local development tests. Outside `Development`, mock mode returns `disabled`.
 
 ### Scale Configuration
 ```json
@@ -125,13 +138,14 @@ VOIP notes:
 - If `BridgeToken` is empty, `POST /api/voip/call` returns `403`
 - The bridge only listens on localhost
 - `AllowedOrigins` must include the frontend origin
+- Production deployments must provide explicit allowed origins and trusted tenant suffixes through config. There is no wildcard CORS fallback.
 
 ## API Endpoints
 
 ### Fingerprint Device Endpoints
 
 #### POST /api/fingerprint/connect
-Test connection to a fingerprint device.
+Test TCP reachability for a fingerprint/attendance endpoint. A reachable TCP socket is not treated as verified attendance-device support.
 
 **Request:**
 ```json
@@ -145,17 +159,22 @@ Test connection to a fingerprint device.
 **Response:**
 ```json
 {
-  "success": true,
-  "deviceInfo": "ZKTeco Attendance Device",
-  "serialNumber": "DEVICE_SERIAL_001",
-  "userCount": 150,
-  "logCount": 5000,
-  "errorMessage": null
+  "success": false,
+  "deviceInfo": null,
+  "serialNumber": null,
+  "userCount": null,
+  "logCount": null,
+  "mode": "unsupported",
+  "ready": false,
+  "code": "fingerprint_protocol_unsupported",
+  "tcpReachable": true,
+  "errorMessage": "Real fingerprint/attendance device protocol is not implemented yet.",
+  "errorMessageFa": "اتصال واقعی دستگاه حضور و غیاب هنوز پیاده‌سازی نشده است."
 }
 ```
 
 #### POST /api/fingerprint/status
-Get device status and detailed information.
+Test TCP reachability for status. Real status metadata is not returned until a vendor protocol/SDK is implemented.
 
 **Request:**
 ```json
@@ -169,21 +188,19 @@ Get device status and detailed information.
 **Response:**
 ```json
 {
-  "success": true,
-  "isConnected": true,
-  "deviceName": "ZKTeco Attendance Device",
-  "serialNumber": "DEVICE_SERIAL_001",
-  "firmwareVersion": "Ver 6.60",
-  "userCount": 150,
-  "logCount": 5000,
-  "availableUserSlots": 850,
-  "availableLogSlots": 195000,
-  "deviceTime": "2025-01-15T10:30:00Z"
+  "success": false,
+  "isConnected": false,
+  "tcpReachable": true,
+  "mode": "unsupported",
+  "ready": false,
+  "code": "fingerprint_protocol_unsupported",
+  "errorMessage": "Real fingerprint/attendance device protocol is not implemented yet.",
+  "errorMessageFa": "اتصال واقعی دستگاه حضور و غیاب هنوز پیاده‌سازی نشده است."
 }
 ```
 
 #### POST /api/fingerprint/sync
-Sync attendance logs from device.
+Sync attendance logs from device. This returns `unsupported` until real device protocol support is implemented.
 
 **Request:**
 ```json
@@ -198,17 +215,15 @@ Sync attendance logs from device.
 **Response:**
 ```json
 {
-  "success": true,
-  "totalLogs": 25,
-  "logs": [
-    {
-      "userId": "EMP001",
-      "logTime": "2025-01-15T08:30:00Z",
-      "logType": 0,
-      "verifyMode": 1
-    }
-  ],
-  "syncedAt": "2025-01-15T10:30:00Z"
+  "success": false,
+  "totalLogs": 0,
+  "logs": [],
+  "syncedAt": null,
+  "mode": "unsupported",
+  "ready": false,
+  "code": "unsupported",
+  "errorMessage": "Real fingerprint/attendance device protocol is not implemented yet.",
+  "errorMessageFa": "اتصال واقعی دستگاه حضور و غیاب هنوز پیاده‌سازی نشده است."
 }
 ```
 
@@ -227,18 +242,14 @@ Get users registered on device.
 **Response:**
 ```json
 {
-  "success": true,
-  "totalUsers": 150,
-  "users": [
-    {
-      "userId": "EMP001",
-      "name": "علی محمدی",
-      "privilege": 0,
-      "hasFingerprint": true,
-      "hasCard": false,
-      "hasPassword": false
-    }
-  ]
+  "success": false,
+  "totalUsers": 0,
+  "users": [],
+  "mode": "unsupported",
+  "ready": false,
+  "code": "unsupported",
+  "errorMessage": "Real fingerprint/attendance device protocol is not implemented yet.",
+  "errorMessageFa": "اتصال واقعی دستگاه حضور و غیاب هنوز پیاده‌سازی نشده است."
 }
 ```
 
@@ -260,8 +271,12 @@ Register a user on the device for fingerprint enrollment.
 **Response:**
 ```json
 {
-  "success": true,
-  "message": "کاربر EMP001 با موفقیت در دستگاه ثبت شد. اکنون اثر انگشت خود را روی دستگاه ثبت کنید."
+  "success": false,
+  "mode": "unsupported",
+  "ready": false,
+  "code": "unsupported",
+  "errorMessage": "Real fingerprint/attendance device protocol is not implemented yet.",
+  "errorMessageFa": "اتصال واقعی دستگاه حضور و غیاب هنوز پیاده‌سازی نشده است."
 }
 ```
 
@@ -295,7 +310,7 @@ Clear all attendance logs from device.
 ### POS Endpoints
 
 #### POST /api/pos/sale
-Process a POS payment.
+Process a POS payment. Real POS integration returns `unsupported` until a certified/vendor integration is implemented.
 
 **Request:**
 ```json
@@ -308,9 +323,13 @@ Process a POS payment.
 **Response:**
 ```json
 {
-  "success": true,
-  "rrn": "123456789012",
-  "errorMessage": null
+  "success": false,
+  "rrn": null,
+  "mode": "unsupported",
+  "ready": false,
+  "code": "unsupported",
+  "errorMessage": "Real POS integration is not implemented yet.",
+  "errorMessageFa": "اتصال واقعی کارتخوان هنوز پیاده‌سازی نشده است."
 }
 ```
 
@@ -324,6 +343,9 @@ Read weight from the scale.
 {
   "success": true,
   "weight": 1.234,
+  "mode": "real",
+  "ready": true,
+  "code": "ready",
   "errorMessage": null
 }
 ```
@@ -366,7 +388,7 @@ Health check endpoint.
 ### VOIP Endpoints
 
 #### GET /api/bridge/health
-Returns generic bridge presence and pairing metadata.
+Returns generic bridge presence, pairing metadata, and per-service readiness.
 
 **Response example:**
 ```json
@@ -374,8 +396,25 @@ Returns generic bridge presence and pairing metadata.
   "success": true,
   "deviceId": "device_abc123",
   "bridgeVersion": "1.0.0",
-  "capabilities": ["voip", "print", "scale", "pos", "fingerprint"],
-  "requiresPairing": true
+  "capabilities": ["barcode"],
+  "requiresPairing": true,
+  "services": [
+    {
+      "capability": "pos",
+      "ready": false,
+      "mode": "unsupported",
+      "code": "unsupported",
+      "message": "Real POS integration is not implemented yet.",
+      "messageFa": "اتصال واقعی کارتخوان هنوز پیاده‌سازی نشده است."
+    },
+    {
+      "capability": "barcode",
+      "ready": true,
+      "mode": "real",
+      "code": "barcode_keyboard_wedge",
+      "message": "Barcode scanners are handled as keyboard input; the bridge does not detect barcode hardware."
+    }
+  ]
 }
 ```
 
@@ -391,7 +430,9 @@ Returns local VOIP bridge readiness for the frontend.
   "enabled": true,
   "ready": false,
   "provider": "tel_uri",
-  "issues": ["Bridge token is not configured."]
+  "issues": ["Bridge token is not configured."],
+  "mode": "misconfigured",
+  "code": "voip_token_missing"
 }
 ```
 
@@ -428,13 +469,13 @@ X-Bridge-Token: YOUR_TOKEN
 ## Device Integration
 
 ### Fingerprint/Attendance Devices
-Supports TCP/IP connected fingerprint devices. The `FingerprintService.cs` provides a template for device communication.
+The MVP tests TCP reachability only. The `FingerprintService.cs` deliberately returns `unsupported` for device metadata, users, logs, enrollment, delete, and clear-log operations until a real vendor SDK/protocol is implemented.
 
 **ZKTeco Devices** (Most Common):
 - Default port: 4370
 - Protocol: ZK Protocol (TCP/IP)
-- The service includes placeholder methods that simulate device responses
-- To implement actual device communication, replace the simulation code with ZK SDK calls
+- The current service does not implement or simulate the ZK protocol
+- To implement actual device communication, add verified ZK SDK/protocol calls
 
 **Implementation Notes**:
 ```csharp
@@ -445,7 +486,7 @@ Supports TCP/IP connected fingerprint devices. The `FingerprintService.cs` provi
 ```
 
 ### POS Terminal
-Currently implemented as a simulation. Replace the `ProcessSale` method in `PosService.cs` with actual device communication based on your POS device's protocol (TCP/IP, Serial, or vendor SDK).
+Real POS integration is not implemented. `Pos:Mode=mock` is development-only and returns `mode: "mock"` so it cannot be mistaken for a real terminal approval. Add a certified/vendor implementation before returning `mode: "real"` or a real RRN.
 
 ### Scale
 Configured via SerialPort. Adjust the parsing logic in `ScaleService.cs` based on your scale's output format.
@@ -502,7 +543,7 @@ Most USB barcode scanners work as keyboard wedge (they type into focused input).
 
 ## Development
 
-The bridge includes TODO comments where device-specific code should be implemented. Replace simulation code with actual device communication based on your hardware specifications.
+Add device-specific code only when vendor/model/protocol/SDK and deployment details are known. Keep unsupported services returning structured errors until real verification exists.
 
 ## Security
 
@@ -512,6 +553,7 @@ The bridge includes TODO comments where device-specific code should be implement
 - `BridgeToken` is stored in local writable settings, not returned by health endpoints
 - If `BridgeToken` is empty, `POST /api/voip/call` returns `403`
 - `AllowedOrigins` must include the frontend origin for browser access
+- Do not infer device readiness from bridge liveness
 
 ## License
 

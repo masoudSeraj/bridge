@@ -6,7 +6,7 @@ namespace Bridge.Models;
 public record FingerprintDeviceConfig(
     string IpAddress,
     int Port,
-    string? DeviceType = "ZKTeco", // ZKTeco, Suprema, Anviz, etc.
+    string? DeviceType = "ZKTeco", // Metadata only until a real vendor protocol is implemented.
     int TimeoutSeconds = 30
 );
 
@@ -28,7 +28,12 @@ public record DeviceConnectResult(
     string? SerialNumber = null,
     int? UserCount = null,
     int? LogCount = null,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    string Mode = BridgeModes.Unsupported,
+    bool Ready = false,
+    string Code = BridgeCodes.Unsupported,
+    string? ErrorMessageFa = null,
+    bool? TcpReachable = null
 );
 
 /// <summary>
@@ -59,7 +64,11 @@ public record AttendanceSyncResult(
     int TotalLogs,
     List<AttendanceLogEntry>? Logs = null,
     DateTime? SyncedAt = null,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    string Mode = BridgeModes.Unsupported,
+    bool Ready = false,
+    string Code = BridgeCodes.Unsupported,
+    string? ErrorMessageFa = null
 );
 
 /// <summary>
@@ -90,7 +99,11 @@ public record DeviceUsersResult(
     bool Success,
     int TotalUsers,
     List<DeviceUser>? Users = null,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    string Mode = BridgeModes.Unsupported,
+    bool Ready = false,
+    string Code = BridgeCodes.Unsupported,
+    string? ErrorMessageFa = null
 );
 
 /// <summary>
@@ -111,7 +124,11 @@ public record EnrollUserRequest(
 public record EnrollUserResult(
     bool Success,
     string? Message = null,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    string Mode = BridgeModes.Unsupported,
+    bool Ready = false,
+    string Code = BridgeCodes.Unsupported,
+    string? ErrorMessageFa = null
 );
 
 /// <summary>
@@ -130,7 +147,11 @@ public record DeleteUserRequest(
 public record DeleteUserResult(
     bool Success,
     string? Message = null,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    string Mode = BridgeModes.Unsupported,
+    bool Ready = false,
+    string Code = BridgeCodes.Unsupported,
+    string? ErrorMessageFa = null
 );
 
 /// <summary>
@@ -148,7 +169,11 @@ public record ClearLogsRequest(
 public record ClearLogsResult(
     bool Success,
     string? Message = null,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    string Mode = BridgeModes.Unsupported,
+    bool Ready = false,
+    string Code = BridgeCodes.Unsupported,
+    string? ErrorMessageFa = null
 );
 
 /// <summary>
@@ -165,5 +190,10 @@ public record DeviceStatusResult(
     int? AvailableUserSlots = null,
     int? AvailableLogSlots = null,
     DateTime? DeviceTime = null,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    string Mode = BridgeModes.Unsupported,
+    bool Ready = false,
+    string Code = BridgeCodes.Unsupported,
+    string? ErrorMessageFa = null,
+    bool? TcpReachable = null
 );

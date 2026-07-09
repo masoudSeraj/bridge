@@ -34,6 +34,10 @@ public class TelUriVoipProvider : IVoipProvider
                 Provider = _providerName,
                 Status = "invalid",
                 ErrorMessage = "Phone is required.",
+                ErrorMessageFa = "شماره تلفن الزامی است.",
+                Mode = BridgeModes.Misconfigured,
+                Ready = false,
+                Code = "voip_phone_required",
             });
         }
 
@@ -46,6 +50,10 @@ public class TelUriVoipProvider : IVoipProvider
                 Provider = _providerName,
                 Status = "invalid",
                 ErrorMessage = "Phone format is invalid.",
+                ErrorMessageFa = "فرمت شماره تلفن معتبر نیست.",
+                Mode = BridgeModes.Misconfigured,
+                Ready = false,
+                Code = "voip_phone_invalid",
             });
         }
 
@@ -68,6 +76,9 @@ public class TelUriVoipProvider : IVoipProvider
                 Status = "requested",
                 CallSessionId = Guid.NewGuid().ToString("N"),
                 ErrorMessage = null,
+                Mode = BridgeModes.Real,
+                Ready = true,
+                Code = "voip_call_requested",
             });
         }
         catch (Exception ex)
@@ -78,6 +89,10 @@ public class TelUriVoipProvider : IVoipProvider
                 Provider = _providerName,
                 Status = "failed",
                 ErrorMessage = ex.Message,
+                ErrorMessageFa = "سیستم عامل نتوانست برنامه تماس را اجرا کند.",
+                Mode = BridgeModes.Misconfigured,
+                Ready = false,
+                Code = "voip_launch_failed",
             });
         }
     }
@@ -107,6 +122,10 @@ public class TelUriVoipProvider : IVoipProvider
             Ready = issues.Count == 0,
             Provider = _providerName,
             Issues = issues.ToArray(),
+            Mode = issues.Count == 0 ? BridgeModes.Real : BridgeModes.Misconfigured,
+            Code = issues.Count == 0 ? BridgeCodes.Ready : "voip_not_ready",
+            ErrorMessage = issues.Count == 0 ? null : string.Join(" ", issues),
+            ErrorMessageFa = issues.Count == 0 ? null : "تنظیمات VOIP کامل نیست.",
         });
     }
 
@@ -153,6 +172,29 @@ public class VoipService
     public Task<VoipCallResponse> CallAsync(VoipCallRequest request, CancellationToken cancellationToken = default)
     {
         return _provider.CallAsync(request, cancellationToken);
+    }
+
+    public async Task<DeviceReadiness> GetReadinessAsync(CancellationToken cancellationToken = default)
+    {
+        var health = await _provider.HealthAsync(cancellationToken);
+        return new DeviceReadiness
+        {
+            Capability = "voip",
+            Ready = health.Ready,
+            Mode = health.Mode,
+            Code = health.Code,
+            Message = health.ErrorMessage ?? (health.Ready
+                ? "VOIP bridge configuration is ready. Softphone availability is verified only when a call is requested."
+                : "VOIP bridge configuration is not ready."),
+            MessageFa = health.ErrorMessageFa ?? (health.Ready
+                ? "تنظیمات VOIP آماده است. وجود نرم‌افزار تماس فقط هنگام درخواست تماس مشخص می‌شود."
+                : "تنظیمات VOIP آماده نیست."),
+            Metadata = new Dictionary<string, object?>
+            {
+                ["provider"] = health.Provider,
+                ["issues"] = health.Issues,
+            },
+        };
     }
 }
 

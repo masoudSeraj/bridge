@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using System.Text;
+using Bridge.Models;
 
 namespace Bridge.Services;
 
@@ -7,63 +8,56 @@ public class PosService
 {
     private readonly ILogger<PosService> _logger;
     private readonly IConfiguration _configuration;
+    private readonly IHostEnvironment _environment;
 
-    public PosService(ILogger<PosService> logger, IConfiguration configuration)
+    public PosService(
+        ILogger<PosService> logger,
+        IConfiguration configuration,
+        IHostEnvironment environment)
     {
         _logger = logger;
         _configuration = configuration;
+        _environment = environment;
     }
 
     public async Task<Models.PosSaleResult> ProcessSale(decimal amount, string invoiceId)
     {
         try
         {
-            _logger.LogInformation($"POS payment request. Invoice: {invoiceId}, Amount: {amount}");
+            _logger.LogInformation("POS payment request received.");
 
-            // TODO: Replace this simulation with actual POS device communication
-            // Example implementations:
-            // - TCP/IP: Use TcpClient to connect to POS device IP/Port
-            // - Serial: Use SerialPort to communicate via COM port
-            // - Vendor SDK: Use manufacturer's SDK if available
-
-            // Simulate POS delay
-            await Task.Delay(2000);
-
-            // Simulate payment processing
-            // In real implementation, this would:
-            // 1. Connect to POS device
-            // 2. Send payment amount
-            // 3. Wait for customer to complete transaction on device
-            // 4. Receive response (success/fail, RRN, etc.)
-            // 5. Return result
-
-            bool paymentSuccess = true; // Simulated success
-            string? rrn = null;
-            string? errorMessage = null;
-
-            if (paymentSuccess)
+            var mode = (_configuration["Pos:Mode"] ?? Bridge.Models.BridgeModes.Unsupported).Trim().ToLowerInvariant();
+            if (!string.Equals(mode, Bridge.Models.BridgeModes.Mock, StringComparison.OrdinalIgnoreCase))
             {
-                // Generate example RRN (Retrieval Reference Number)
-                rrn = GenerateRrn();
-                _logger.LogInformation($"POS payment successful. RRN: {rrn}");
-                
-                return new Models.PosSaleResult(
-                    Success: true,
-                    Rrn: rrn,
-                    ErrorMessage: null
-                );
+                return Unsupported();
             }
-            else
+
+            if (!_environment.IsDevelopment())
             {
-                errorMessage = "Payment declined by POS device";
-                _logger.LogWarning($"POS payment failed: {errorMessage}");
-                
                 return new Models.PosSaleResult(
                     Success: false,
                     Rrn: null,
-                    ErrorMessage: errorMessage
+                    ErrorMessage: "POS mock mode is only available in Development.",
+                    Mode: Bridge.Models.BridgeModes.Disabled,
+                    Ready: false,
+                    Code: Bridge.Models.BridgeCodes.MockDisabled,
+                    ErrorMessageFa: "حالت شبیه‌سازی کارتخوان فقط در محیط توسعه فعال است."
                 );
             }
+
+            await Task.Delay(2000);
+
+            var rrn = GenerateRrn();
+            _logger.LogInformation("Mock POS payment completed.");
+
+            return new Models.PosSaleResult(
+                Success: true,
+                Rrn: rrn,
+                ErrorMessage: null,
+                Mode: Bridge.Models.BridgeModes.Mock,
+                Ready: true,
+                Code: "pos_mock_success"
+            );
         }
         catch (Exception ex)
         {
@@ -71,9 +65,58 @@ public class PosService
             return new Models.PosSaleResult(
                 Success: false,
                 Rrn: null,
-                ErrorMessage: $"POS communication error: {ex.Message}"
+                ErrorMessage: $"POS communication error: {ex.Message}",
+                Mode: Bridge.Models.BridgeModes.Misconfigured,
+                Ready: false,
+                Code: "pos_error",
+                ErrorMessageFa: "خطا در ارتباط با کارتخوان."
             );
         }
+    }
+
+    public DeviceReadiness GetReadiness()
+    {
+        var mode = (_configuration["Pos:Mode"] ?? Bridge.Models.BridgeModes.Unsupported).Trim().ToLowerInvariant();
+        if (string.Equals(mode, Bridge.Models.BridgeModes.Mock, StringComparison.OrdinalIgnoreCase))
+        {
+            var mockReady = _environment.IsDevelopment();
+            return new DeviceReadiness
+            {
+                Capability = "pos",
+                Ready = mockReady,
+                Mode = mockReady ? Bridge.Models.BridgeModes.Mock : Bridge.Models.BridgeModes.Disabled,
+                Code = mockReady ? "pos_mock_ready" : Bridge.Models.BridgeCodes.MockDisabled,
+                Message = mockReady
+                    ? "POS is running in explicit development mock mode."
+                    : "POS mock mode is disabled outside Development.",
+                MessageFa = mockReady
+                    ? "کارتخوان در حالت شبیه‌سازی توسعه فعال است."
+                    : "شبیه‌سازی کارتخوان خارج از محیط توسعه غیرفعال است.",
+            };
+        }
+
+        return new DeviceReadiness
+        {
+            Capability = "pos",
+            Ready = false,
+            Mode = Bridge.Models.BridgeModes.Unsupported,
+            Code = Bridge.Models.BridgeCodes.Unsupported,
+            Message = "Real POS integration is not implemented yet.",
+            MessageFa = "اتصال واقعی کارتخوان هنوز پیاده‌سازی نشده است.",
+        };
+    }
+
+    private static Models.PosSaleResult Unsupported()
+    {
+        return new Models.PosSaleResult(
+            Success: false,
+            Rrn: null,
+            ErrorMessage: "Real POS integration is not implemented yet.",
+            Mode: Bridge.Models.BridgeModes.Unsupported,
+            Ready: false,
+            Code: Bridge.Models.BridgeCodes.Unsupported,
+            ErrorMessageFa: "اتصال واقعی کارتخوان هنوز پیاده‌سازی نشده است."
+        );
     }
 
     private static string GenerateRrn()

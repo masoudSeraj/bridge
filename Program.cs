@@ -5,6 +5,9 @@ using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+
 // Configure to listen only on localhost for security
 builder.WebHost.UseUrls("http://localhost:5005");
 
@@ -41,7 +44,6 @@ var allowedOrigins = bridgeSection.GetSection("AllowedOrigins").Get<string[]>() 
 var bridgeToken = bridgeSection.GetValue<string>("BridgeToken") ?? string.Empty;
 var deviceId = bridgeSection.GetValue<string>("DeviceId") ?? string.Empty;
 var bridgeVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
-var capabilities = new[] { "voip", "print", "scale", "pos", "fingerprint" };
 var configuredMaxCallsPerMinute = voipSection.GetValue<int?>("MaxCallsPerMinute") ?? 30;
 var maxCallsPerMinute = configuredMaxCallsPerMinute <= 0 || configuredMaxCallsPerMinute > 300
     ? 30
@@ -68,9 +70,14 @@ bool IsLoopbackRequest(HttpContext context)
     return false;
 }
 
-BridgeHealthResponse CreateBridgeHealthResponse()
+BridgeHealthResponse CreateBridgeHealthResponse(DeviceReadiness[] services)
 {
     var tokenConfigured = !string.IsNullOrWhiteSpace(bridgeToken);
+    var readyCapabilities = services
+        .Where(service => service.Ready)
+        .Select(service => service.Capability)
+        .ToArray();
+
     return new BridgeHealthResponse
     {
         Success = true,
@@ -84,12 +91,26 @@ BridgeHealthResponse CreateBridgeHealthResponse()
             : "Bridge نصب شده است، اما توکن هنوز پیکربندی نشده است.",
         DeviceId = deviceId,
         BridgeVersion = bridgeVersion,
-        Capabilities = capabilities,
+        Capabilities = readyCapabilities,
         RequiresPairing = true,
         TokenConfigured = tokenConfigured,
         ListenUrl = listenUrl,
         SettingsPath = bridgeSettingsService.SettingsPath,
         SetupUrl = setupUrl,
+        Services = services,
+    };
+}
+
+DeviceReadiness CreateBarcodeReadiness()
+{
+    return new DeviceReadiness
+    {
+        Capability = "barcode",
+        Ready = true,
+        Mode = BridgeModes.Real,
+        Code = "barcode_keyboard_wedge",
+        Message = "Barcode scanners are handled as keyboard input; the bridge does not detect barcode hardware.",
+        MessageFa = "بارکدخوان به صورت ورودی کیبورد کار می‌کند و Bridge سخت‌افزار بارکدخوان را تشخیص نمی‌دهد.",
     };
 }
 
@@ -236,7 +257,27 @@ app.MapGet("/api/health", () =>
     return Results.Ok(new { status = "ok", timestamp = DateTime.UtcNow });
 });
 
-app.MapGet("/api/bridge/health", () => Results.Ok(CreateBridgeHealthResponse()));
+app.MapGet(
+    "/api/bridge/health",
+    async (
+        PosService posService,
+        ScaleService scaleService,
+        PrinterService printerService,
+        FingerprintService fingerprintService,
+        VoipService voipService) =>
+    {
+        var services = new[]
+        {
+            posService.GetReadiness(),
+            scaleService.GetReadiness(),
+            printerService.GetReadiness(),
+            fingerprintService.GetReadiness(),
+            await voipService.GetReadinessAsync(),
+            CreateBarcodeReadiness(),
+        };
+
+        return Results.Ok(CreateBridgeHealthResponse(services));
+    });
 
 app.MapGet("/setup", (HttpContext context) =>
 {

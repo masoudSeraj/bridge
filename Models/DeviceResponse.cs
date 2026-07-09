@@ -3,7 +3,11 @@ namespace Bridge.Models;
 public record ScaleReadResult(
     bool Success,
     decimal Weight,
-    string? ErrorMessage
+    string? ErrorMessage,
+    string Mode = BridgeModes.Real,
+    bool Ready = true,
+    string Code = BridgeCodes.Ready,
+    string? ErrorMessageFa = null
 );
 
 public record ReceiptPrintRequest(
@@ -15,5 +19,9 @@ public record ReceiptPrintRequest(
 
 public record ReceiptPrintResult(
     bool Success,
-    string? ErrorMessage
+    string? ErrorMessage,
+    string Mode = BridgeModes.Real,
+    bool Ready = true,
+    string Code = BridgeCodes.Ready,
+    string? ErrorMessageFa = null
 );
