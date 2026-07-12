@@ -7,6 +7,15 @@ namespace Bridge.Services;
 
 public class PrinterService
 {
+    private const double HundredthsOfInchPerMillimeter = 100d / 25.4d;
+    private const double HorizontalMarginMillimeters = 3d;
+    private const double TopMarginMillimeters = 3d;
+    private const double BottomFeedMillimeters = 10d;
+    private const int MinimumPaperHeightHundredths = 200;
+    // Keep custom paper length below the Windows DEVMODE signed-short limit
+    // (roughly 3.27m) while leaving ample room for long retail baskets.
+    private const int MaximumPaperHeightHundredths = 12000;
+
     private readonly ILogger<PrinterService> _logger;
     private readonly IConfiguration _configuration;
 
@@ -29,7 +38,10 @@ public class PrinterService
                 ? _configuration["Printer:Name"]
                 : requestedPrinterName.Trim();
             var widthMm = printerWidthMm == 58 ? 58 : 80;
-            var paperWidthPixels = widthMm == 58 ? 219 : 283; // ~58mm / ~80mm at 96 DPI
+            var paperWidthHundredths = MillimetersToHundredthsOfInch(widthMm);
+            var horizontalMargin = MillimetersToHundredthsOfInch(HorizontalMarginMillimeters);
+            var topMargin = MillimetersToHundredthsOfInch(TopMarginMillimeters);
+            var bottomMargin = MillimetersToHundredthsOfInch(BottomFeedMillimeters);
 
             _logger.LogInformation(
                 "Printing receipt. WidthMm: {WidthMm}; Printer: {PrinterName}",
@@ -54,8 +66,6 @@ public class PrinterService
                 }
             }
 
-            pd.DefaultPageSettings.PaperSize = new PaperSize("Receipt", paperWidthPixels, 1000);
-
             var fontName = _configuration["Printer:ReceiptFontName"] ?? "Tahoma";
             var fontSize = float.TryParse(
                 _configuration["Printer:ReceiptFontSize"],
@@ -65,27 +75,48 @@ public class PrinterService
                 ? parsedSize
                 : 9f;
 
+            var receiptText = FormatReceiptText(text);
+            var printableWidthHundredths = Math.Max(
+                1,
+                paperWidthHundredths - (horizontalMargin * 2));
+            var paperHeightHundredths = CalculatePaperHeightHundredths(
+                receiptText,
+                fontName,
+                fontSize,
+                printableWidthHundredths,
+                topMargin,
+                bottomMargin);
+
+            pd.DefaultPageSettings.PaperSize = new PaperSize(
+                $"Receipt {widthMm}mm",
+                paperWidthHundredths,
+                paperHeightHundredths);
+            pd.DefaultPageSettings.Margins = new Margins(
+                horizontalMargin,
+                horizontalMargin,
+                topMargin,
+                bottomMargin);
+
             pd.PrintPage += (sender, args) =>
             {
                 using var font = new Font(fontName, fontSize, FontStyle.Regular);
                 using var brush = new SolidBrush(Color.Black);
 
-                var receiptText = FormatReceiptText(text);
-
-                var rect = new RectangleF(0, 0, args.PageBounds.Width, args.PageBounds.Height);
-                var format = new StringFormat
-                {
-                    Alignment = StringAlignment.Near,
-                    LineAlignment = StringAlignment.Near,
-                    FormatFlags = StringFormatFlags.DirectionRightToLeft
-                };
+                using var format = CreateReceiptStringFormat();
 
                 if (args.Graphics is null)
                 {
                     throw new InvalidOperationException("Printer graphics context is unavailable.");
                 }
 
+                var rect = new RectangleF(
+                    args.MarginBounds.Left,
+                    args.MarginBounds.Top,
+                    args.MarginBounds.Width,
+                    args.MarginBounds.Height);
+
                 args.Graphics.DrawString(receiptText, font, brush, rect, format);
+                args.HasMorePages = false;
             };
 
             pd.Print();
@@ -193,5 +224,58 @@ public class PrinterService
     {
         var normalized = text.Replace("\r\n", "\n").Replace("\n", Environment.NewLine);
         return normalized.TrimEnd() + Environment.NewLine + Environment.NewLine;
+    }
+
+    private static int MillimetersToHundredthsOfInch(double millimeters)
+    {
+        return (int)Math.Round(
+            millimeters * HundredthsOfInchPerMillimeter,
+            MidpointRounding.AwayFromZero);
+    }
+
+    private static int CalculatePaperHeightHundredths(
+        string receiptText,
+        string fontName,
+        float fontSize,
+        int printableWidthHundredths,
+        int topMarginHundredths,
+        int bottomMarginHundredths)
+    {
+        using var bitmap = new Bitmap(1, 1);
+        bitmap.SetResolution(96f, 96f);
+        using var graphics = Graphics.FromImage(bitmap);
+        using var font = new Font(fontName, fontSize, FontStyle.Regular);
+        using var format = CreateReceiptStringFormat();
+
+        var printableWidthPixels = Math.Max(
+            1f,
+            printableWidthHundredths / 100f * graphics.DpiX);
+        var maximumHeightPixels = MaximumPaperHeightHundredths / 100f * graphics.DpiY;
+        var measured = graphics.MeasureString(
+            receiptText,
+            font,
+            new SizeF(printableWidthPixels, maximumHeightPixels),
+            format);
+        var measuredHeightHundredths = (int)Math.Ceiling(
+            measured.Height / graphics.DpiY * 100f);
+        var requestedHeight = measuredHeightHundredths
+            + topMarginHundredths
+            + bottomMarginHundredths;
+
+        return Math.Clamp(
+            requestedHeight,
+            MinimumPaperHeightHundredths,
+            MaximumPaperHeightHundredths);
+    }
+
+    private static StringFormat CreateReceiptStringFormat()
+    {
+        return new StringFormat
+        {
+            Alignment = StringAlignment.Near,
+            LineAlignment = StringAlignment.Near,
+            FormatFlags = StringFormatFlags.DirectionRightToLeft,
+            Trimming = StringTrimming.None,
+        };
     }
 }
