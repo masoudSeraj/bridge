@@ -189,8 +189,18 @@ app.MapPost("/api/pos/sale", async (PosSaleRequest req, PosService posService) =
 // Thermal receipt printing
 app.MapPost("/api/print/receipt", (ReceiptPrintRequest req, PrinterService printerService) =>
 {
-    var result = printerService.PrintReceipt(req.Text, req.InvoiceNumber, req.CustomerName, req.PrinterWidthMm);
+    var result = printerService.PrintReceipt(
+        req.Text,
+        req.InvoiceNumber,
+        req.CustomerName,
+        req.PrinterWidthMm,
+        req.PrinterName);
     return Results.Ok(result);
+});
+
+app.MapGet("/api/printers", (PrinterService printerService) =>
+{
+    return Results.Ok(printerService.GetInstalledPrinters());
 });
 
 // Read scale weight from serial port

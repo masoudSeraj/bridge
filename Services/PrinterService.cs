@@ -20,21 +20,38 @@ public class PrinterService
         string text,
         string? invoiceNumber = null,
         string? customerName = null,
-        int? printerWidthMm = null)
+        int? printerWidthMm = null,
+        string? requestedPrinterName = null)
     {
         try
         {
-            var printerName = _configuration["Printer:Name"];
+            var printerName = string.IsNullOrWhiteSpace(requestedPrinterName)
+                ? _configuration["Printer:Name"]
+                : requestedPrinterName.Trim();
             var widthMm = printerWidthMm == 58 ? 58 : 80;
             var paperWidthPixels = widthMm == 58 ? 219 : 283; // ~58mm / ~80mm at 96 DPI
 
-            _logger.LogInformation("Printing receipt. WidthMm: {WidthMm}", widthMm);
+            _logger.LogInformation(
+                "Printing receipt. WidthMm: {WidthMm}; Printer: {PrinterName}",
+                widthMm,
+                string.IsNullOrWhiteSpace(printerName) ? "(default)" : printerName);
 
-            PrintDocument pd = new PrintDocument();
+            using PrintDocument pd = new PrintDocument();
 
             if (!string.IsNullOrEmpty(printerName))
             {
                 pd.PrinterSettings.PrinterName = printerName;
+                if (!pd.PrinterSettings.IsValid)
+                {
+                    return new Models.ReceiptPrintResult(
+                        false,
+                        $"Printer not found: {printerName}",
+                        BridgeModes.Misconfigured,
+                        false,
+                        "printer_not_found",
+                        "چاپگر انتخاب‌شده روی این کامپیوتر پیدا نشد."
+                    );
+                }
             }
 
             pd.DefaultPageSettings.PaperSize = new PaperSize("Receipt", paperWidthPixels, 1000);
@@ -98,6 +115,43 @@ public class PrinterService
                 false,
                 "printer_error",
                 "خطا در چاپ رسید."
+            );
+        }
+    }
+
+    public Models.PrinterListResult GetInstalledPrinters()
+    {
+        try
+        {
+            var printers = PrinterSettings.InstalledPrinters
+                .Cast<string>()
+                .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
+                .ToArray();
+            var defaultPrinter = new PrinterSettings().PrinterName;
+
+            return new Models.PrinterListResult(
+                true,
+                printers,
+                string.IsNullOrWhiteSpace(defaultPrinter) ? null : defaultPrinter,
+                null,
+                BridgeModes.Real,
+                printers.Length > 0,
+                printers.Length > 0 ? BridgeCodes.Ready : "printer_not_found",
+                printers.Length > 0 ? null : "هیچ چاپگری روی این کامپیوتر نصب نشده است."
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to enumerate installed printers");
+            return new Models.PrinterListResult(
+                false,
+                Array.Empty<string>(),
+                null,
+                $"Printer enumeration failed: {ex.Message}",
+                BridgeModes.Misconfigured,
+                false,
+                "printer_list_error",
+                "دریافت فهرست چاپگرهای نصب‌شده ناموفق بود."
             );
         }
     }

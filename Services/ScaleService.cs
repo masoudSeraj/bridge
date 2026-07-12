@@ -1,5 +1,6 @@
 using System.IO.Ports;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Bridge.Models;
 
 namespace Bridge.Services;
@@ -36,39 +37,37 @@ public class ScaleService
             string line = serial.ReadLine();
             _logger.LogDebug("Scale returned a line of data.");
 
-            // Parse weight from scale output
-            // Format depends on scale model - adjust parsing logic as needed
-            if (decimal.TryParse(line.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var weight))
+            var configuredOutputUnit = _configuration["Scale:OutputUnit"];
+            if (TryNormalizeKilograms(
+                line,
+                configuredOutputUnit,
+                out var weightKg,
+                out var errorCode,
+                out var errorMessage,
+                out var errorMessageFa))
             {
-                _logger.LogInformation("Weight read successfully.");
-                return new Models.ScaleReadResult(true, weight, null, BridgeModes.Real, true, BridgeCodes.Ready);
-            }
-            else
-            {
-                // Try to extract weight from formatted string (e.g., "1.234 kg" or "1234 g")
-                var cleaned = line.Trim()
-                    .Replace("kg", "", StringComparison.OrdinalIgnoreCase)
-                    .Replace("g", "", StringComparison.OrdinalIgnoreCase)
-                    .Replace(" ", "")
-                    .Trim();
-
-                if (decimal.TryParse(cleaned, NumberStyles.Any, CultureInfo.InvariantCulture, out weight))
-                {
-                    _logger.LogInformation("Weight parsed from formatted string.");
-                    return new Models.ScaleReadResult(true, weight, null, BridgeModes.Real, true, BridgeCodes.Ready);
-                }
-
-                _logger.LogWarning("Cannot parse weight from scale output.");
+                _logger.LogInformation("Weight read and normalized to kilograms.");
                 return new Models.ScaleReadResult(
-                    false,
-                    0,
-                    "Cannot parse weight from scale output.",
-                    BridgeModes.Misconfigured,
-                    false,
-                    "scale_parse_error",
-                    "خروجی ترازو قابل خواندن نیست. تنظیمات مدل ترازو را بررسی کنید."
-                );
+                    true,
+                    decimal.Round(weightKg, 3, MidpointRounding.AwayFromZero),
+                    null,
+                    BridgeModes.Real,
+                    true,
+                    BridgeCodes.Ready,
+                    null,
+                    "kg");
             }
+
+            _logger.LogWarning("Cannot normalize scale output. Code: {Code}", errorCode);
+            return new Models.ScaleReadResult(
+                false,
+                0,
+                errorMessage,
+                BridgeModes.Misconfigured,
+                false,
+                errorCode,
+                errorMessageFa
+            );
         }
         catch (FileNotFoundException)
         {
@@ -135,6 +134,80 @@ public class ScaleService
                 "خطا در خواندن از ترازو."
             );
         }
+    }
+
+    private static bool TryNormalizeKilograms(
+        string raw,
+        string? configuredBareUnit,
+        out decimal weightKg,
+        out string errorCode,
+        out string errorMessage,
+        out string errorMessageFa)
+    {
+        weightKg = 0;
+        errorCode = "scale_parse_error";
+        errorMessage = "Cannot parse weight from scale output.";
+        errorMessageFa = "خروجی ترازو قابل خواندن نیست. تنظیمات مدل ترازو را بررسی کنید.";
+
+        var match = Regex.Match(
+            raw.Trim(),
+            @"^\s*[-+]?\d+(?:[\.,]\d+)?\s*(?<unit>[A-Za-z\u0600-\u06FF]+)?\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var numericText = match.Value;
+        var capturedUnit = match.Groups["unit"].Value;
+        if (!string.IsNullOrWhiteSpace(capturedUnit))
+        {
+            numericText = numericText[..numericText.LastIndexOf(capturedUnit, StringComparison.OrdinalIgnoreCase)];
+        }
+
+        numericText = numericText.Trim().Replace(',', '.');
+        if (!decimal.TryParse(numericText, NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var weight))
+        {
+            return false;
+        }
+
+        if (weight <= 0)
+        {
+            errorCode = "scale_non_positive_weight";
+            errorMessage = "Scale returned a zero or negative weight.";
+            errorMessageFa = "وزن خوانده‌شده باید بیشتر از صفر باشد.";
+            return false;
+        }
+
+        var unit = string.IsNullOrWhiteSpace(capturedUnit)
+            ? configuredBareUnit?.Trim().ToLowerInvariant()
+            : capturedUnit.Trim().ToLowerInvariant();
+
+        if (string.IsNullOrWhiteSpace(unit))
+        {
+            errorCode = "scale_output_unit_missing";
+            errorMessage = "Scale output has no unit and Scale:OutputUnit is not configured.";
+            errorMessageFa = "واحد خروجی ترازو مشخص نیست. واحد پیش‌فرض ترازو را در تنظیمات Bridge تعیین کنید.";
+            return false;
+        }
+
+        if (unit is "kg" or "kilogram" or "kilograms" or "کیلو" or "کیلوگرم")
+        {
+            weightKg = weight;
+            return true;
+        }
+
+        if (unit is "g" or "gram" or "grams" or "گرم")
+        {
+            weightKg = weight / 1000m;
+            return true;
+        }
+
+        errorCode = "scale_unit_unsupported";
+        errorMessage = $"Unsupported scale output unit: {unit}";
+        errorMessageFa = "واحد خروجی ترازو پشتیبانی نمی‌شود؛ فقط گرم یا کیلوگرم مجاز است.";
+        return false;
     }
 
     public DeviceReadiness GetReadiness()
