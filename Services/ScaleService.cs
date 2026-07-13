@@ -21,7 +21,20 @@ public class ScaleService
         try
         {
             // Get scale configuration from appsettings.json
-            var portName = _configuration["Scale:PortName"] ?? "COM3";
+            var portName = _configuration["Scale:PortName"];
+            if (string.IsNullOrWhiteSpace(portName))
+            {
+                return new Models.ScaleReadResult(
+                    false,
+                    0,
+                    "Scale serial port is not configured.",
+                    BridgeModes.Misconfigured,
+                    false,
+                    "scale_port_missing",
+                    "پورت سریال ترازو تنظیم نشده است."
+                );
+            }
+
             var baudRate = int.Parse(_configuration["Scale:BaudRate"] ?? "9600");
             var parity = ParseParity(_configuration["Scale:Parity"] ?? "None");
             var dataBits = int.Parse(_configuration["Scale:DataBits"] ?? "8");

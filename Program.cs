@@ -2,6 +2,8 @@ using Bridge.Services;
 using Bridge.Models;
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,8 +32,6 @@ builder.Services.AddSingleton<VoipService>();
 var bridgeSection = builder.Configuration.GetSection("Bridge");
 var voipSection = builder.Configuration.GetSection("Voip");
 var configuredAllowedOrigins = bridgeSection.GetSection("AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
-var allowTenantSubdomains = bridgeSection.GetValue<bool?>("AllowTenantSubdomains") ?? false;
-var trustedDomainSuffix = bridgeSection.GetValue<string>("TrustedDomainSuffix") ?? string.Empty;
 var configuredDeviceId = bridgeSection.GetValue<string>("DeviceId");
 var configuredBridgeToken = bridgeSection.GetValue<string>("BridgeToken");
 
@@ -41,6 +41,9 @@ builder.Configuration.AddJsonFile(bridgeSettingsService.SettingsPath, optional: 
 bridgeSection = builder.Configuration.GetSection("Bridge");
 voipSection = builder.Configuration.GetSection("Voip");
 var allowedOrigins = bridgeSection.GetSection("AllowedOrigins").Get<string[]>() ?? configuredAllowedOrigins;
+var allowAnyWebOrigin = bridgeSection.GetValue<bool?>("AllowAnyWebOrigin") ?? false;
+var allowTenantSubdomains = bridgeSection.GetValue<bool?>("AllowTenantSubdomains") ?? false;
+var trustedDomainSuffix = bridgeSection.GetValue<string>("TrustedDomainSuffix") ?? string.Empty;
 var bridgeToken = bridgeSection.GetValue<string>("BridgeToken") ?? string.Empty;
 var deviceId = bridgeSection.GetValue<string>("DeviceId") ?? string.Empty;
 var bridgeVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
@@ -70,7 +73,7 @@ bool IsLoopbackRequest(HttpContext context)
     return false;
 }
 
-BridgeHealthResponse CreateBridgeHealthResponse(DeviceReadiness[] services)
+BridgeHealthResponse CreateBridgeHealthResponse(DeviceReadiness[] services, bool paired)
 {
     var tokenConfigured = !string.IsNullOrWhiteSpace(bridgeToken);
     var readyCapabilities = services
@@ -94,6 +97,7 @@ BridgeHealthResponse CreateBridgeHealthResponse(DeviceReadiness[] services)
         Capabilities = readyCapabilities,
         RequiresPairing = true,
         TokenConfigured = tokenConfigured,
+        Paired = paired,
         ListenUrl = listenUrl,
         SettingsPath = bridgeSettingsService.SettingsPath,
         SetupUrl = setupUrl,
@@ -124,6 +128,19 @@ bool IsOriginAllowed(string? origin)
     if (!Uri.TryCreate(origin, UriKind.Absolute, out var originUri))
     {
         return false;
+    }
+
+    if (originUri.Scheme is not ("http" or "https"))
+    {
+        return false;
+    }
+
+    // Hardware endpoints require the workstation token. Allowing arbitrary
+    // web origins here supports custom tenant domains without granting device
+    // access to sites that do not possess that token.
+    if (allowAnyWebOrigin)
+    {
+        return true;
     }
 
     if (allowedOrigins.Any(candidate => string.Equals(candidate, origin, StringComparison.OrdinalIgnoreCase)))
@@ -162,7 +179,8 @@ var app = builder.Build();
 app.Use(async (context, next) =>
 {
     if (context.Request.Headers.TryGetValue("Access-Control-Request-Private-Network", out var requested) &&
-        string.Equals(requested.ToString(), "true", StringComparison.OrdinalIgnoreCase))
+        string.Equals(requested.ToString(), "true", StringComparison.OrdinalIgnoreCase) &&
+        IsOriginAllowed(context.Request.Headers.Origin.ToString()))
     {
         context.Response.Headers["Access-Control-Allow-Private-Network"] = "true";
     }
@@ -178,6 +196,70 @@ app.Use(async (context, next) =>
 
 // Use CORS
 app.UseCors();
+
+bool IsAuthorizedBridgeRequest(HttpRequest request)
+{
+    if (string.IsNullOrWhiteSpace(bridgeToken))
+    {
+        return false;
+    }
+
+    if (!request.Headers.TryGetValue("X-Bridge-Token", out var header)
+        || string.IsNullOrWhiteSpace(header))
+    {
+        return false;
+    }
+
+    var expected = Encoding.UTF8.GetBytes(bridgeToken);
+    var supplied = Encoding.UTF8.GetBytes(header.ToString());
+    return expected.Length == supplied.Length
+        && CryptographicOperations.FixedTimeEquals(expected, supplied);
+}
+
+bool RequiresHardwareAuthorization(PathString path)
+{
+    return path.StartsWithSegments("/api/pos")
+        || path.StartsWithSegments("/api/print")
+        || path.StartsWithSegments("/api/printers")
+        || path.StartsWithSegments("/api/scale")
+        || path.StartsWithSegments("/api/fingerprint")
+        || path.StartsWithSegments("/api/pairing/verify");
+}
+
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsOptions(context.Request.Method)
+        || !RequiresHardwareAuthorization(context.Request.Path))
+    {
+        await next();
+        return;
+    }
+
+    if (!IsAuthorizedBridgeRequest(context.Request))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            success = false,
+            ready = false,
+            mode = BridgeModes.Misconfigured,
+            code = BridgeCodes.PairingRequired,
+            errorMessage = "Bridge pairing token is missing or invalid.",
+            errorMessageFa = "توکن اتصال Bridge وارد نشده یا نامعتبر است.",
+        });
+        return;
+    }
+
+    await next();
+});
+
+app.MapGet("/api/pairing/verify", () => Results.Ok(new
+{
+    success = true,
+    paired = true,
+    deviceId,
+    bridgeVersion,
+}));
 
 // POS payment endpoint
 app.MapPost("/api/pos/sale", async (PosSaleRequest req, PosService posService) =>
@@ -208,6 +290,21 @@ app.MapGet("/api/scale/read", (ScaleService scaleService) =>
 {
     var result = scaleService.ReadWeight();
     return Results.Ok(result);
+});
+
+app.MapGet("/api/scale/configuration", (
+    BridgeSettingsService settingsService,
+    IConfiguration configuration) =>
+{
+    return Results.Ok(settingsService.GetScaleConfiguration(configuration));
+});
+
+app.MapPut("/api/scale/configuration", (
+    ScaleConfigurationRequest request,
+    BridgeSettingsService settingsService) =>
+{
+    var result = settingsService.UpdateScaleConfiguration(request);
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
 });
 
 // ==================== Fingerprint Device Endpoints ====================
@@ -270,6 +367,7 @@ app.MapGet("/api/health", () =>
 app.MapGet(
     "/api/bridge/health",
     async (
+        HttpRequest request,
         PosService posService,
         ScaleService scaleService,
         PrinterService printerService,
@@ -286,7 +384,9 @@ app.MapGet(
             CreateBarcodeReadiness(),
         };
 
-        return Results.Ok(CreateBridgeHealthResponse(services));
+        return Results.Ok(CreateBridgeHealthResponse(
+            services,
+            IsAuthorizedBridgeRequest(request)));
     });
 
 app.MapGet("/setup", (HttpContext context) =>
@@ -304,23 +404,6 @@ app.MapGet("/setup", (HttpContext context) =>
             bridgeSettingsService.SettingsPath),
         "text/html; charset=utf-8");
 });
-
-// Simple helper to validate X-Bridge-Token header for VOIP endpoints
-bool IsAuthorizedVoipRequest(HttpRequest request)
-{
-    if (string.IsNullOrWhiteSpace(bridgeToken))
-    {
-        // When no token is set, reject VOIP calls for safety.
-        return false;
-    }
-
-    if (!request.Headers.TryGetValue("X-Bridge-Token", out var header) || string.IsNullOrWhiteSpace(header))
-    {
-        return false;
-    }
-
-    return string.Equals(header.ToString(), bridgeToken, StringComparison.Ordinal);
-}
 
 bool IsRateLimited(HttpRequest request)
 {
@@ -352,7 +435,7 @@ app.MapGet("/api/voip/health", async (VoipService voipService) =>
 
 app.MapPost("/api/voip/call", async (HttpRequest httpRequest, VoipCallRequest req, VoipService voipService) =>
 {
-    if (!IsAuthorizedVoipRequest(httpRequest))
+    if (!IsAuthorizedBridgeRequest(httpRequest))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }

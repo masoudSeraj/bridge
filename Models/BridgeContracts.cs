@@ -17,6 +17,7 @@ public static class BridgeCodes
     public const string Misconfigured = "misconfigured";
     public const string MockDisabled = "mock_disabled";
     public const string BridgeUnavailable = "bridge_unavailable";
+    public const string PairingRequired = "bridge_pairing_required";
 }
 
 public sealed class DeviceReadiness

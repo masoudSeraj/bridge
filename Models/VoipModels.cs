@@ -12,6 +12,7 @@ public class BridgeHealthResponse
     public string[] Capabilities { get; set; } = Array.Empty<string>();
     public bool RequiresPairing { get; set; }
     public bool TokenConfigured { get; set; }
+    public bool Paired { get; set; }
     public string? ListenUrl { get; set; }
     public string? SettingsPath { get; set; }
     public string? SetupUrl { get; set; }
